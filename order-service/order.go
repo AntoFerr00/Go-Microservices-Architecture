@@ -1,4 +1,4 @@
-package main
+package order
 
 import (
 	"encoding/json"
@@ -10,6 +10,7 @@ import (
 	"Go_Microservices_Architecture/project-root/common"
 )
 
+// Order represents an order record.
 type Order struct {
 	ID        int    `json:"id"`
 	UserID    int    `json:"user_id"`
@@ -18,31 +19,20 @@ type Order struct {
 	OrderDate string `json:"order_date"`
 }
 
-// For combining order data with user info
+// OrderWithUser combines Order with the user's name.
 type OrderWithUser struct {
 	Order
 	UserName string `json:"user_name"`
 }
 
+// User is used to decode responses from the user-service.
 type User struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
 
-func main() {
-	// Connect to DB
-	common.ConnectToDatabase("root:@tcp(127.0.0.1:3307)/go_microservices_db")
-
-	// Simple endpoint to list orders (and optionally fetch user details)
-	http.HandleFunc("/orders", ordersHandler)
-
-	log.Println("Starting Order Service on port 8082...")
-	if err := http.ListenAndServe(":8082", nil); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-}
-
-func ordersHandler(w http.ResponseWriter, r *http.Request) {
+// GetOrdersHandler handles GET requests to /orders.
+func GetOrdersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		getAllOrders(w, r)
@@ -51,7 +41,7 @@ func ordersHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GET all orders, then fetch user data from user-service
+// getAllOrders retrieves orders from the database and augments them with user data.
 func getAllOrders(w http.ResponseWriter, r *http.Request) {
 	rows, err := common.DB.Query("SELECT id, user_id, product, quantity, order_date FROM orders")
 	if err != nil {
@@ -70,8 +60,6 @@ func getAllOrders(w http.ResponseWriter, r *http.Request) {
 		orders = append(orders, o)
 	}
 
-	// For demonstration, fetch user data from user-service
-	// We combine the order info with the user's name
 	var results []OrderWithUser
 	for _, o := range orders {
 		user, err := getUserFromUserService(o.UserID)
@@ -79,7 +67,6 @@ func getAllOrders(w http.ResponseWriter, r *http.Request) {
 		if err == nil && user != nil {
 			userName = user.Name
 		}
-
 		results = append(results, OrderWithUser{
 			Order:    o,
 			UserName: userName,
@@ -89,10 +76,9 @@ func getAllOrders(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, results)
 }
 
-// Example service-to-service call to user-service
+// getUserFromUserService makes a service-to-service call to get the user data.
 func getUserFromUserService(userID int) (*User, error) {
 	url := fmt.Sprintf("http://localhost:8081/users?id=%d", userID)
-
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, err
@@ -107,7 +93,6 @@ func getUserFromUserService(userID int) (*User, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		// Log the response body for debugging
 		var respBody string
 		if bodyBytes, err := io.ReadAll(resp.Body); err == nil {
 			respBody = string(bodyBytes)
@@ -123,7 +108,7 @@ func getUserFromUserService(userID int) (*User, error) {
 	return &user, nil
 }
 
-// Utility to write JSON responses
+// writeJSON writes the data as JSON.
 func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)

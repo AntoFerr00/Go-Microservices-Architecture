@@ -1,49 +1,22 @@
-package main
+package user
 
 import (
+	"database/sql"
 	"encoding/json"
-	"log"
 	"net/http"
 	"strconv"
 
-	// Import the shared DB package
 	"Go_Microservices_Architecture/project-root/common"
 )
 
-// Simple struct representing a user in our system
+// User represents a user record.
 type User struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
 }
 
-// Middleware that checks for a simple Bearer token
-func authMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := r.Header.Get("Authorization")
-		// Expect "Bearer secret-token" for this example
-		if token != "Bearer secret-token" {
-			http.Error(w, "Unauthorized", http.StatusUnauthorized)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
-func main() {
-	// Connect to DB (change port or credentials as needed)
-	common.ConnectToDatabase("root:@tcp(127.0.0.1:3307)/go_microservices_db")
-
-	// Wrap our /users endpoint with authentication middleware
-	http.Handle("/users", authMiddleware(http.HandlerFunc(userHandler)))
-
-	log.Println("Starting User Service on port 8081...")
-	if err := http.ListenAndServe(":8081", nil); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
-	}
-}
-
-// userHandler routes GET, POST, PUT, DELETE methods to different functions
-func userHandler(w http.ResponseWriter, r *http.Request) {
+// GetUsersHandler routes requests for the /users endpoint.
+func GetUsersHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		idParam := r.URL.Query().Get("id")
@@ -65,9 +38,7 @@ func userHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// =============== Handlers for each CRUD operation ===============
-
-// GET all users
+// getAllUsers retrieves all users from the database.
 func getAllUsers(w http.ResponseWriter, r *http.Request) {
 	rows, err := common.DB.Query("SELECT id, name FROM users")
 	if err != nil {
@@ -88,91 +59,84 @@ func getAllUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, users)
 }
 
-// GET a user by ID
+// getUserByID retrieves a specific user by ID.
 func getUserByID(w http.ResponseWriter, r *http.Request, idParam string) {
 	id, err := strconv.Atoi(idParam)
 	if err != nil {
 		http.Error(w, "Invalid ID parameter", http.StatusBadRequest)
 		return
 	}
-
 	var user User
-	err = common.DB.QueryRow("SELECT id, name FROM users WHERE id = ?", id).
-		Scan(&user.ID, &user.Name)
+	err = common.DB.QueryRow("SELECT id, name FROM users WHERE id = ?", id).Scan(&user.ID, &user.Name)
 	if err != nil {
-		http.Error(w, "User not found or error querying database: "+err.Error(), http.StatusNotFound)
+		if err == sql.ErrNoRows {
+			http.Error(w, "User not found", http.StatusNotFound)
+		} else {
+			http.Error(w, "Error querying database: "+err.Error(), http.StatusInternalServerError)
+		}
 		return
 	}
-
 	writeJSON(w, user)
 }
 
-// POST - create a new user
+// createUser inserts a new user into the database.
 func createUser(w http.ResponseWriter, r *http.Request) {
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-
 	result, err := common.DB.Exec("INSERT INTO users (name) VALUES (?)", user.Name)
 	if err != nil {
 		http.Error(w, "Error inserting user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	lastID, err := result.LastInsertId()
 	if err != nil {
 		http.Error(w, "Error getting last insert ID: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	user.ID = int(lastID)
-
 	writeJSON(w, user)
 }
 
-// PUT - update an existing user by ID
+// updateUser updates an existing user record.
 func updateUser(w http.ResponseWriter, r *http.Request, idParam string) {
 	id, err := strconv.Atoi(idParam)
 	if err != nil || id <= 0 {
 		http.Error(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
-
 	var user User
 	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
 		http.Error(w, "Invalid JSON", http.StatusBadRequest)
 		return
 	}
-
 	_, err = common.DB.Exec("UPDATE users SET name = ? WHERE id = ?", user.Name, id)
 	if err != nil {
 		http.Error(w, "Error updating user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
 	user.ID = id
 	writeJSON(w, user)
 }
 
-// DELETE - remove a user by ID
+// deleteUser removes a user record from the database.
 func deleteUser(w http.ResponseWriter, r *http.Request, idParam string) {
 	id, err := strconv.Atoi(idParam)
 	if err != nil || id <= 0 {
 		http.Error(w, "Invalid user ID", http.StatusBadRequest)
 		return
 	}
-
 	_, err = common.DB.Exec("DELETE FROM users WHERE id = ?", id)
 	if err != nil {
 		http.Error(w, "Error deleting user: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	w.WriteHeader(http.StatusNoContent) // 204 No Content
+	w.WriteHeader(http.StatusNoContent)
 }
 
-// Utility to write JSON responses
+// writeJSON writes the given data as JSON.
 func writeJSON(w http.ResponseWriter, data interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(data)
